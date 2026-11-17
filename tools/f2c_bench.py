@@ -23,7 +23,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-BENCH_VERSION = "benchmark_v1 / f2c_bench 1.0"
+BENCH_VERSION = "benchmark_v1 / f2c_bench 1.3"
 
 CONFIG = dict(
     area_ha=20.0,
@@ -36,7 +36,9 @@ CONFIG = dict(
     gate_subset=dict(shape="rectangle", densities=[0.5, 2.0], width=24, otype="tree", pattern="poisson"),
     r_min=6.0, max_diff_curv=0.1, cruise_vel=2.5, turn_vel=1.2, reverse_penalty_s=10.0,
     margin=3.0, k_min=2, rp_time=10, rp_optimum=True, allow_reverse=True,
-    turn_discretization=0.2,   # m between turn points (F2C default 0.01 -> ~20x fewer path points)
+    turn_discretization=0.2,
+    sg_allow_overlap=False,    # F2C flag; has no effect on generateBestSwaths in v2.1.1 (verified)
+    fill_remainders=True,      # add an overlapping swath where a strip < w is left beside the last swath   # m between turn points (F2C default 0.01 -> ~20x fewer path points)
     raster_res=1.0, cover_headlands=True, placement_inset=10.0,
     # SC-aware selection criterion C = c_t*T[min] + c_p*applied_SC[ha] + c_m*missed_area[ha]  (R4)
     c_t=2.5,       # cost per minute of machine time
@@ -52,7 +54,7 @@ COLUMNS = ("instance_id seed shape area_ha density_per_ha n_obstacles obstacle_t
            "n_swaths turns reversals L_work_m L_turn_m L_total_m eta_pct time_min over_crop_m outside_paddock_m "
            "min_clearance_m max_curvature missed_pct overlap_pct offtarget_m2 applied_ha product_saved_pct "
            "sections_on_pct t_hg_s t_sg_s t_rp_s t_pp_s t_detour_s t_sim_s "
-           "crit_C selected turn_model k_headland gate_x gate_y n_groups error").split()
+           "crit_C selected turn_model k_headland gate_x gate_y n_groups min_clearance_work_m min_clearance_turn_m error").split()
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +165,7 @@ class Planner:
         self.robot = rb
         self.hl = f2c.HG_Const_gen()
         self.bf = f2c.SG_BruteForce()
+        self.bf.setAllowOverlap(bool(cfg.get("sg_allow_overlap", False)))
         self.pp = f2c.PP_PathPlanning()
 
     def cells(self, holes=()):
@@ -178,11 +181,12 @@ class Planner:
         no = self.hl.generateHeadlands(cells, self.k * self.w)
         return mid, no, time.perf_counter() - t0
 
-    def headland_passes(self, cells):
+    def headland_passes(self, cells, n_rounds=None):
         from shapely.geometry import LineString
         if not self.cfg["cover_headlands"]:
             return []
-        rings = self.hl.generateHeadlandSwaths(cells, self.w, max(1, int(self.k)), False)
+        n = int(self.k) if n_rounds is None else int(n_rounds)
+        rings = self.hl.generateHeadlandSwaths(cells, self.w, max(1, n), False)
         out = []
         for i in range(len(rings)):
             for p in polys(to_shapely(rings[i])):
@@ -198,7 +202,49 @@ class Planner:
             sw = self.bf.generateBestSwaths(obj, self.w, no_hl)
         else:
             sw = self.bf.generateSwaths(angle, self.w, no_hl)
+        if self.cfg.get("fill_remainders", True):
+            self.n_fill = self.fill_remainders(no_hl, sw)
         return sw, angle, time.perf_counter() - t0
+
+    def fill_remainders(self, no_hl, sw, tol=0.5):
+        """F2C's brute-force generator spaces swaths w apart from one side of a cell, which leaves an
+        uncovered strip (< w) along the far side. Add one overlapping swath along each such strip.
+        Mutates `sw` in place (sw is alive, so sw.at(ci) is a safe reference)."""
+        from shapely.geometry import LineString
+        from shapely.ops import unary_union
+        f2c, w = self.f2c, self.w
+        cells = [to_shapely(no_hl.getGeometry(i)) for i in range(no_hl.size())]
+        added = 0
+        for ci in range(sw.size()):
+            cur = sw.at(ci)
+            if cur.size() == 0:
+                continue
+            lines = [to_shapely(cur.at(i).clone().getPath()) for i in range(cur.size())]
+            c0 = np.asarray(lines[0].coords)
+            u = (c0[-1] - c0[0]) / np.linalg.norm(c0[-1] - c0[0])
+            nrm = np.array([-u[1], u[0]])
+            mid = lines[0].interpolate(0.5, normalized=True)
+            cell = min(cells, key=lambda c: c.distance(mid))
+            covered = unary_union([l.buffer(w / 2, cap_style="flat") for l in lines])
+            unc = cell.difference(covered).buffer(-tol / 2).buffer(tol / 2)
+            for piece in polys(unc):
+                if piece.is_empty or piece.area < w * w:
+                    continue
+                xy = np.asarray(piece.exterior.coords)
+                if np.ptp(xy @ u) < 2 * w:          # small corner wedges are left to the headland
+                    continue
+                cpos = 0.5 * ((xy @ nrm).min() + (xy @ nrm).max())
+                base = cpos * nrm
+                cut = LineString([base - 1e5 * u, base + 1e5 * u]).intersection(cell)
+                for seg in getattr(cut, "geoms", [cut]):
+                    if seg.geom_type != "LineString" or seg.length < w or not seg.intersects(piece.buffer(0.1)):
+                        continue
+                    ls = f2c.LineString()
+                    for x, y in seg.coords:
+                        ls.addPoint(float(x), float(y))
+                    cur.emplace_back(ls, w, 100000 + added)
+                    added += 1
+        return added
 
     def route(self, mid_hl, swaths):
         from shapely.geometry import Point
@@ -232,6 +278,14 @@ class Planner:
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
+def _part_clear(track, obstacles, width, kind):
+    """Min edge clearance over the working ('swath') or non-working ('turn') pieces only."""
+    pieces = track.pieces(kind)
+    if not obstacles or not pieces:
+        return ""
+    return round(min(g.distance(o["poly"]) for g in pieces for o in obstacles) - width / 2, 3)
+
+
 def evaluate(cfg, track, *, field_shp, zones, crop, obstacles, width, n_sections, extra):
     """Path metrics (shared by both SC rows) + one simulation per SC setting."""
     from bench_geom import turn_length_inside, length_outside, clearance, max_curvature, simulate_coverage
@@ -243,6 +297,8 @@ def evaluate(cfg, track, *, field_shp, zones, crop, obstacles, width, n_sections
                 time_min=round(T / 60, 2), over_crop_m=round(turn_length_inside(track, crop.buffer(-1.0)), 1),
                 outside_paddock_m=round(length_outside(track, field_shp), 1),
                 min_clearance_m=round(min(clearance(track, obstacles, width)), 3) if obstacles else "",
+                min_clearance_work_m=_part_clear(track, obstacles, width, "swath"),
+                min_clearance_turn_m=_part_clear(track, obstacles, width, "turn"),
                 max_curvature=round(max((max_curvature(g) for g in track.pieces("swath")), default=0.0), 4))
     sims = {}
     for sc in (False, True):
@@ -371,7 +427,14 @@ def run_instance(cfg, spec, out_dir):
             sw, angle, t_sg2 = P.swaths(no_B2)
             route, t_rp2 = P.route(mid_B, sw)
             track, model, t_pp2 = P.path(route)
-            emit("B2", track, no_B_shp, HL_B, dict(t_hg_s=round(t_hg2, 3), t_sg_s=round(t_sg2, 3),
+            HL_B2 = P.headland_passes(cells_B, n_rounds=max(1, round(0.5 * P.k)))
+            # corridors between decomposed cells are travel lanes in F2C's recipe; work them as passes
+            from bench_geom import corridor_passes
+            from shapely.ops import unary_union as _uu
+            dshp = _uu([to_shapely(dcells.getGeometry(i)) for i in range(dcells.size())])
+            gaps = dshp.difference(to_shapely(no_B2)).buffer(-0.25).buffer(0.25)
+            HL_B2 = HL_B2 + corridor_passes(gaps, w)
+            emit("B2", track, no_B_shp, HL_B2, dict(t_hg_s=round(t_hg2, 3), t_sg_s=round(t_sg2, 3),
                  t_rp_s=round(t_rp2, 3), t_pp_s=round(t_pp2, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model,
                  decomp_failed=False)
         except Exception as e:

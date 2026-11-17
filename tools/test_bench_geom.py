@@ -43,6 +43,11 @@ for ax, (shape, otype, pat, w) in zip(axs.ravel(), [("rectangle", "tree", "poiss
     trB3, unpl = make_drive_around_poly(tr, obs, 3.0, w, 6.0, F.buffer(-w / 2))
     dt = time.time() - t0
     cl = clearance(trB3, obs, w)
+    # regression (v1.0 bug): detours must never double back over an earlier detour on the same swath
+    for g in trB3.pieces("swath"):
+        assert g.is_simple, "self-crossing swath"
+    work_cl = min(g.distance(o["poly"]) for g in trB3.pieces("swath") for o in obs) - w / 2
+    assert unpl > 0 or work_cl >= -1e-6, f"placed detours touch an obstacle ({work_cl:.2f})"
     kmax = max(max_curvature(g) for g in trB3.pieces("swath"))
     zones = unary_union([o["poly"].buffer(3.0) for o in obs])
     t1 = time.time(); sim = simulate_coverage(trB3, F, zones, w, w // 2, 1.0, True); ts = time.time() - t1
