@@ -124,10 +124,20 @@ def obstacle_groups(obstacles, margin):
     return list(groups.values())
 
 
-def clearance(track, obstacles, width):
-    """Edge clearance δ = dist(path, obstacle polygon) − w/2 for each obstacle (canopy / rock)."""
+def half_widths(obstacles, width, track_width=None):
+    """Half-width that must clear each obstacle. Class I (default, and all trees): the implement,
+    w/2. Class II (B4 straddle, outcrops when track_width is given): only the running gear, g/2;
+    the boom passes over with its sections off."""
+    if track_width is None:
+        return [width / 2] * len(obstacles)
+    return [width / 2 if o["type"] == "tree" else track_width / 2 for o in obstacles]
+
+
+def clearance(track, obstacles, width, half=None):
+    """Edge clearance δ = dist(path, obstacle polygon) − half-width for each obstacle (canopy / rock)."""
     ln = track.line
-    return [ln.distance(o["poly"]) - width / 2 for o in obstacles]
+    half = half_widths(obstacles, width) if half is None else half
+    return [ln.distance(o["poly"]) - h for o, h in zip(obstacles, half)]
 
 
 # ---------------------------------------------------------------------------
@@ -259,27 +269,39 @@ def detour_line_convex(line, sets, rho, is_valid, step=0.5, mergeable=None, max_
     return LineString(to_world(P[keep])), len(unplaced_sets)
 
 
-def detour_sets(obstacles, margin, width, r_min, quad_segs=16):
+def detour_sets(obstacles, margin, width, r_min, quad_segs=16, half=None):
     """Smooth convex clearance set per obstacle group:
-    discs (single tree): disc of radius max(r + m + w/2, r_min);
-    otherwise: convex hull of the group ⊕ B(max(m + w/2, r_min))."""
-    eps = margin + width / 2
+    discs (single tree): disc of radius max(r + m + h, r_min);
+    otherwise: convex hull of the group ⊕ B(max(m + h, r_min)).
+    h is the half-width that must clear the obstacle (w/2, or g/2 for B4 class-II outcrops).
+    In a group with mixed h, the hull is taken over each member ⊕ B(max(m + h_i, r_min)); its
+    corners are arcs of radius ≥ r_min, so the fillet/curvature argument still holds."""
+    half = half_widths(obstacles, width) if half is None else half
     sets = []
     for g in obstacle_groups(obstacles, margin):
+        eps = [max(margin + half[i], r_min) for i in g]
         if len(g) == 1 and obstacles[g[0]]["type"] == "tree":
             o = obstacles[g[0]]
             c = o["poly"].centroid
-            sets.append(c.buffer(max(o["r"] + eps, r_min), quad_segs=quad_segs * 2))
-        else:
+            sets.append(c.buffer(max(o["r"] + margin + half[g[0]], r_min), quad_segs=quad_segs * 2))
+        elif len(set(eps)) == 1:
             hull = unary_union([obstacles[i]["poly"] for i in g]).convex_hull
-            sets.append(hull.buffer(max(eps, r_min), quad_segs=quad_segs))
+            sets.append(hull.buffer(eps[0], quad_segs=quad_segs))
+        else:
+            sets.append(unary_union([obstacles[i]["poly"].buffer(e, quad_segs=quad_segs)
+                                     for i, e in zip(g, eps)]).convex_hull)
     return sets
 
 
-def make_drive_around_poly(track, obstacles, margin, width, r_min, allowed_poly, step=0.5):
-    """Strategy B3 for discs and polygons. Returns (Track, n_unplaced_detours)."""
-    sets = detour_sets(obstacles, margin, width, r_min)
-    hard = [o["poly"].buffer(width / 2 - 1e-6) for o in obstacles]
+def make_drive_around_poly(track, obstacles, margin, width, r_min, allowed_poly, step=0.5, half=None):
+    """Strategy B3 (half=None: everything class I) or B4 (half from half_widths(..., track_width)).
+    Returns (Track, n_unplaced_detours)."""
+    # B4 sets hug arcs of exactly r_min, so they need a finer arc (64 segments/quarter) to keep the
+    # discretised curvature at the B3 level (~0.171 vs 1/r_min = 0.167); B3 keeps 16 (as in v1_2).
+    q = 16 if half is None else 64
+    half = half_widths(obstacles, width) if half is None else half
+    sets = detour_sets(obstacles, margin, width, r_min, quad_segs=q, half=half)
+    hard = [o["poly"].buffer(h - 1e-6) for o, h in zip(obstacles, half)]
     hard_tree = shapely.STRtree(hard) if hard else None
 
     def is_valid(piece):

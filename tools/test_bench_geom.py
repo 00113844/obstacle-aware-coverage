@@ -60,3 +60,24 @@ for ax, (shape, otype, pat, w) in zip(axs.ravel(), [("rectangle", "tree", "poiss
     ax.plot(*road_gate(F), "*", ms=14, mfc="gold", mec="k"); ax.set_aspect("equal")
     ax.set_title(f"{shape}/{otype}/{pat}/w{w}: unplaced {unpl}", fontsize=9)
 fig.savefig(sys.argv[1] if len(sys.argv) > 1 else "bench_geom_test.png", dpi=80, bbox_inches="tight")
+
+# 3. B4 straddle: outcrops cleared by the running gear only (g = 3 m), trees still by the implement
+for shape, otype, w in [("rectangle", "outcrop", 24), ("L", "mixed", 12), ("convex", "mixed", 36)]:
+    F = make_field(shape, 20, np.random.default_rng(stable_seed(shape, 0)))
+    obs = make_obstacles(F.buffer(-82), 20, otype, "poisson", np.random.default_rng(stable_seed(shape, otype, "poisson", 0)))
+    tr = mock_track(F.buffer(-2 * w, join_style=2), w, ang=17.0)
+    b3, u3 = make_drive_around_poly(tr, obs, 3.0, w, 6.0, F.buffer(-w / 2))
+    half4 = half_widths(obs, w, 3.0)
+    b4, u4 = make_drive_around_poly(tr, obs, 3.0, w, 6.0, F.buffer(-w / 2), half=half4)
+    for g in b4.pieces("swath"):
+        assert g.is_simple, "B4 self-crossing swath"
+    # working pieces only (the mock's turns are straight chords, as in test 2)
+    cl4 = min(g.distance(o["poly"]) - h for g in b4.pieces("swath") for o, h in zip(obs, half4))
+    assert u4 > 0 or cl4 >= -1e-6, f"B4 running gear touches an obstacle ({cl4:.2f})"
+    tl = [o for o, h in zip(obs, half4) if o["type"] == "tree"]
+    if tl and not u4:
+        assert min(g.distance(o["poly"]) for g in b4.pieces("swath") for o in tl) - w / 2 >= -1e-6, "B4 boom touches a tree"
+    kmax = max(max_curvature(g) for g in b4.pieces("swath"))
+    assert kmax <= 0.175, kmax
+    print(f"B4 {shape:9s} {otype:7s} w={w}: swath length B3 {b3.length('swath'):.0f} m (unplaced {u3}) "
+          f"-> B4 {b4.length('swath'):.0f} m (unplaced {u4}), gear clearance {cl4:.2f} m, kmax {kmax:.3f}")

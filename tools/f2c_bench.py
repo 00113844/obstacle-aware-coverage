@@ -23,7 +23,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-BENCH_VERSION = "benchmark_v1 / f2c_bench 1.4"
+BENCH_VERSION = "benchmark_v1 / f2c_bench 1.5"
 
 CONFIG = dict(
     area_ha=20.0,
@@ -35,7 +35,11 @@ CONFIG = dict(
     seeds=[0, 1, 2, 3, 4],
     gate_subset=dict(shape="rectangle", densities=[0.5, 2.0], width=24, otype="tree", pattern="poisson"),
     r_min=6.0, max_diff_curv=0.1, cruise_vel=2.5, turn_vel=1.2, reverse_penalty_s=10.0,
-    margin=3.0, k_min=2, rp_time=10, rp_optimum=True, allow_reverse=True,
+    margin=3.0, k_min=2,
+    # B4 straddle (R9): class-II obstacles (outcrops) only need clearing by the running gear (track width g);
+    # the boom passes over with sections off. Trees stay class I. B4 is not in the min-C selection
+    # (it is only valid for spraying), so `selected` stays comparable with benchmark_v1_2.
+    track_width=3.0, b4=True, b4_in_selection=False, rp_time=10, rp_optimum=True, allow_reverse=True,
     turn_discretization=0.2,
     sg_allow_overlap=False,    # F2C flag; has no effect on generateBestSwaths in v2.1.1 (verified)
     fill_remainders=True,      # add an overlapping swath where a strip < w is left beside the last swath   # m between turn points (F2C default 0.01 -> ~20x fewer path points)
@@ -296,15 +300,16 @@ class Planner:
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
-def _part_clear(track, obstacles, width, kind):
+def _part_clear(track, obstacles, width, kind, half=None):
     """Min edge clearance over the working ('swath') or non-working ('turn') pieces only."""
     pieces = track.pieces(kind)
     if not obstacles or not pieces:
         return ""
-    return round(min(g.distance(o["poly"]) for g in pieces for o in obstacles) - width / 2, 3)
+    half = [width / 2] * len(obstacles) if half is None else half
+    return round(min(g.distance(o["poly"]) - h for g in pieces for o, h in zip(obstacles, half)), 3)
 
 
-def evaluate(cfg, track, *, field_shp, zones, crop, obstacles, width, n_sections, extra):
+def evaluate(cfg, track, *, field_shp, zones, crop, obstacles, width, n_sections, extra, half=None):
     """Path metrics (shared by both SC rows) + one simulation per SC setting."""
     from bench_geom import turn_length_inside, length_outside, clearance, max_curvature, simulate_coverage
     L_sw, L_tn = track.length("swath"), track.length("turn")
@@ -314,9 +319,9 @@ def evaluate(cfg, track, *, field_shp, zones, crop, obstacles, width, n_sections
                 L_total_m=round(L_sw + L_hl + L_tn, 1), eta_pct=round(100 * (L_sw + L_hl) / (L_sw + L_hl + L_tn), 2),
                 time_min=round(T / 60, 2), over_crop_m=round(turn_length_inside(track, crop.buffer(-1.0)), 1),
                 outside_paddock_m=round(length_outside(track, field_shp), 1),
-                min_clearance_m=round(min(clearance(track, obstacles, width)), 3) if obstacles else "",
-                min_clearance_work_m=_part_clear(track, obstacles, width, "swath"),
-                min_clearance_turn_m=_part_clear(track, obstacles, width, "turn"),
+                min_clearance_m=round(min(clearance(track, obstacles, width, half)), 3) if obstacles else "",
+                min_clearance_work_m=_part_clear(track, obstacles, width, "swath", half),
+                min_clearance_turn_m=_part_clear(track, obstacles, width, "turn", half),
                 max_curvature=round(max((max_curvature(g) for g in track.pieces("swath")), default=0.0), 4))
     sims = {}
     for sc in (False, True):
@@ -372,14 +377,15 @@ def run_instance(cfg, spec, out_dir):
                   n_groups=len(obstacle_groups(obs, cfg["margin"])) if obs else 0)
     rows, geo = [], {}
 
-    def emit(strategy, track, crop, extra, timings, angle, n_sw, turn_model, unplaced="", decomp_failed="", error=""):
+    def emit(strategy, track, crop, extra, timings, angle, n_sw, turn_model, unplaced="", decomp_failed="", error="",
+             half=None):
         if track is None:
             for sc in (0, 1):
                 rows.append({**common, "strategy": strategy, "sc": sc, "feasible": False,
                              "decomp_failed": decomp_failed, "error": error, **timings})
             return
         base, sims = evaluate(cfg, track, field_shp=field, zones=zones, crop=crop, obstacles=obs, width=w,
-                              n_sections=ns, extra=extra)
+                              n_sections=ns, extra=extra, half=half)
         ok_clear = base["min_clearance_m"] == "" or base["min_clearance_m"] >= 0
         feasible = bool(ok_clear and not unplaced)
         for sc in (False, True):
@@ -417,56 +423,57 @@ def run_instance(cfg, spec, out_dir):
     emit("A", track_A, crop_A, HL_A, tim_A, angle_A, nsw_A, model_A)
 
     if obs:
-        # ---- B1: obstacles as holes with headland rings ----
-        mid_B = cells_B = no_B_shp = None
-        try:
-            cells_B = P.cells(holes)
-            mid_B, no_B, t_hgB = P.headlands(cells_B)
-            HL_B = P.headland_passes(cells_B)
-            no_B_shp = to_shapely(no_B)
-            sw, angle, t_sgB = P.swaths(no_B)
-            route, t_rpB = P.route(mid_B, sw)
-            track, model, t_ppB = P.path(route)
-            emit("B1", track, no_B_shp, HL_B, dict(t_hg_s=round(t_hgB, 3), t_sg_s=round(t_sgB, 3),
-                 t_rp_s=round(t_rpB, 3), t_pp_s=round(t_ppB, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model)
-        except Exception as e:
-            emit("B1", None, None, None, {}, None, "", "", error=str(e) if isinstance(e, NoSwaths) else f"{type(e).__name__}: {e}")
+        if not cfg.get("detours_only", False):   # 1.5: B4 runs need only A, B3, B4
+            # ---- B1: obstacles as holes with headland rings ----
+            mid_B = cells_B = no_B_shp = None
+            try:
+                cells_B = P.cells(holes)
+                mid_B, no_B, t_hgB = P.headlands(cells_B)
+                HL_B = P.headland_passes(cells_B)
+                no_B_shp = to_shapely(no_B)
+                sw, angle, t_sgB = P.swaths(no_B)
+                route, t_rpB = P.route(mid_B, sw)
+                track, model, t_ppB = P.path(route)
+                emit("B1", track, no_B_shp, HL_B, dict(t_hg_s=round(t_hgB, 3), t_sg_s=round(t_sgB, 3),
+                     t_rp_s=round(t_rpB, 3), t_pp_s=round(t_ppB, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model)
+            except Exception as e:
+                emit("B1", None, None, None, {}, None, "", "", error=str(e) if isinstance(e, NoSwaths) else f"{type(e).__name__}: {e}")
 
-        # ---- B2: Boustrophedon decomposition ----
-        stage = "headlands"
-        try:
-            if mid_B is None or no_B_shp is None:
-                raise RuntimeError("B1 headlands unavailable")
-            if mid_B.size() == 0 or mid_B.area() < 1.0:
-                raise NoSwaths("no swaths: empty headland track")
-            stage = "decomp"
-            t0 = time.perf_counter()
-            dec = P.f2c.DECOMP_Boustrophedon()
-            dec.setSplitAngle(angle_A)
-            dcells = dec.decompose(mid_B)
-            no_B2 = P.f2c.HG_Corridor_gen().generateHeadlands(dcells, 0.5 * P.k * w)
-            # 1.4: HG_Corridor_gen only opens corridors along SHARED cell borders, so outer and hole
-            # edges stayed on the mid-headland track: swaths ended where the turns start, and at
-            # k*w <= 2*r_min (w=12) the Dubins loops left the field / entered obstacle buffers.
-            # Clip to the B1 mainland so every outer/hole edge keeps the full k*w turning band.
-            no_B2 = no_B2.intersection(no_B)
-            t_hg2 = time.perf_counter() - t0
-            stage = "plan"
-            sw, angle, t_sg2 = P.swaths(no_B2)
-            route, t_rp2 = P.route(mid_B, sw)
-            track, model, t_pp2 = P.path(route)
-            HL_B2 = P.headland_passes(cells_B)
-            # corridors between decomposed cells are travel lanes in F2C's recipe; work them as passes
-            from bench_geom import corridor_passes, clean_poly
-            gaps = clean_poly(no_B_shp).difference(clean_poly(to_shapely(no_B2)))
-            gaps = gaps.buffer(-0.25).buffer(0.25)
-            HL_B2 = HL_B2 + corridor_passes(gaps, w)
-            emit("B2", track, no_B_shp, HL_B2, dict(t_hg_s=round(t_hg2, 3), t_sg_s=round(t_sg2, 3),
-                 t_rp_s=round(t_rp2, 3), t_pp_s=round(t_pp2, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model,
-                 decomp_failed=False)
-        except Exception as e:
-            emit("B2", None, None, None, {}, None, "", "", decomp_failed=(stage == "decomp" and not isinstance(e, NoSwaths)),
-                 error=str(e) if isinstance(e, NoSwaths) else f"{type(e).__name__}: {e}")
+            # ---- B2: Boustrophedon decomposition ----
+            stage = "headlands"
+            try:
+                if mid_B is None or no_B_shp is None:
+                    raise RuntimeError("B1 headlands unavailable")
+                if mid_B.size() == 0 or mid_B.area() < 1.0:
+                    raise NoSwaths("no swaths: empty headland track")
+                stage = "decomp"
+                t0 = time.perf_counter()
+                dec = P.f2c.DECOMP_Boustrophedon()
+                dec.setSplitAngle(angle_A)
+                dcells = dec.decompose(mid_B)
+                no_B2 = P.f2c.HG_Corridor_gen().generateHeadlands(dcells, 0.5 * P.k * w)
+                # 1.4: HG_Corridor_gen only opens corridors along SHARED cell borders, so outer and hole
+                # edges stayed on the mid-headland track: swaths ended where the turns start, and at
+                # k*w <= 2*r_min (w=12) the Dubins loops left the field / entered obstacle buffers.
+                # Clip to the B1 mainland so every outer/hole edge keeps the full k*w turning band.
+                no_B2 = no_B2.intersection(no_B)
+                t_hg2 = time.perf_counter() - t0
+                stage = "plan"
+                sw, angle, t_sg2 = P.swaths(no_B2)
+                route, t_rp2 = P.route(mid_B, sw)
+                track, model, t_pp2 = P.path(route)
+                HL_B2 = P.headland_passes(cells_B)
+                # corridors between decomposed cells are travel lanes in F2C's recipe; work them as passes
+                from bench_geom import corridor_passes, clean_poly
+                gaps = clean_poly(no_B_shp).difference(clean_poly(to_shapely(no_B2)))
+                gaps = gaps.buffer(-0.25).buffer(0.25)
+                HL_B2 = HL_B2 + corridor_passes(gaps, w)
+                emit("B2", track, no_B_shp, HL_B2, dict(t_hg_s=round(t_hg2, 3), t_sg_s=round(t_sg2, 3),
+                     t_rp_s=round(t_rp2, 3), t_pp_s=round(t_pp2, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model,
+                     decomp_failed=False)
+            except Exception as e:
+                emit("B2", None, None, None, {}, None, "", "", decomp_failed=(stage == "decomp" and not isinstance(e, NoSwaths)),
+                     error=str(e) if isinstance(e, NoSwaths) else f"{type(e).__name__}: {e}")
 
         # ---- B3: A's plan + detours (t_hg..t_pp are A's, since B3 reuses A's plan) ----
         t0 = time.perf_counter()
@@ -474,8 +481,19 @@ def run_instance(cfg, spec, out_dir):
         emit("B3", track_B3, crop_A, HL_A, {**tim_A, "t_detour_s": round(time.perf_counter() - t0, 3)},
              angle_A, nsw_A, model_A, unplaced=unplaced)
 
+        # ---- B4: straddle class-II obstacles (outcrops); same A plan, smaller detours ----
+        if cfg.get("b4", False) and any(o["type"] != "tree" for o in obs):
+            from bench_geom import half_widths
+            half4 = half_widths(obs, w, cfg["track_width"])
+            t0 = time.perf_counter()
+            track_B4, unplaced4 = make_drive_around_poly(track_A, obs, cfg["margin"], w, cfg["r_min"],
+                                                         field.buffer(-w / 2), half=half4)
+            emit("B4", track_B4, crop_A, HL_A, {**tim_A, "t_detour_s": round(time.perf_counter() - t0, 3)},
+                 angle_A, nsw_A, model_A, unplaced=unplaced4, half=half4)
+
     # ---- selection by C among feasible obstacle strategies (SC on) ----
-    cands = [r for r in rows if r["sc"] == 1 and r.get("feasible") and (r["strategy"] != "A" or not obs)]
+    cands = [r for r in rows if r["sc"] == 1 and r.get("feasible") and (r["strategy"] != "A" or not obs)
+             and (r["strategy"] != "B4" or cfg.get("b4_in_selection", False))]
     best = min(cands, key=lambda r: r["crit_C"])["strategy"] if cands else ""
     for r in rows:
         r["selected"] = int(r["strategy"] == best)
@@ -539,15 +557,22 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--limit", type=int, default=0, help="plan at most N pending instances")
     ap.add_argument("--filter", default="", help="only instance ids containing this text")
+    ap.add_argument("--otypes", default="", help="design: keep only these obstacle types, e.g. outcrop,mixed")
+    ap.add_argument("--detours-only", action="store_true", help="design: plan only A, B3 and B4 (skip B1/B2)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
     if a.cmd == "design":
-        rows = make_design(CONFIG)
+        cfg = dict(CONFIG)
+        if a.detours_only:
+            cfg["detours_only"] = True
+        rows = make_design(cfg)
+        if a.otypes:
+            rows = [r for r in rows if r["otype"] in a.otypes.split(",")]
         with open(os.path.join(a.out, "design.csv"), "w", newline="") as fh:
             wr = csv.DictWriter(fh, fieldnames=list(rows[0]))
             wr.writeheader(); wr.writerows(rows)
-        json.dump(run_meta(CONFIG), open(os.path.join(a.out, "run_meta.json"), "w"), indent=1)
+        json.dump(run_meta(cfg), open(os.path.join(a.out, "run_meta.json"), "w"), indent=1)
         print(f"{len(rows)} instances -> {a.out}/design.csv")
 
     elif a.cmd == "one":
