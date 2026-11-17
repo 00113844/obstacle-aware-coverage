@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import f2c_bench as fb  # noqa: E402
 
-NATIVE_VERSION = "native_v1 / native_bench 1.0"
+NATIVE_VERSION = "native_v1 / native_bench 1.0.2"
 NCONFIG = dict(
     shapes=["rectangle", "L"], densities=[0.0, 1.0], otype="mixed", pattern="poisson", widths=[12, 24],
     seeds=[0, 1, 2, 3, 4], gate="road",
@@ -107,7 +107,11 @@ def sorted_swaths(f2c, swaths_by_cells, order, k, gate):
             continue
         best = None
         for v in range(4):
-            if order == "spiral":
+            if cell_sw.size() == 1:
+                # F2C 2.1.1 RP_Snake segfaults on a 1-swath Swaths (verified on Nectar); every order is
+                # identical for one swath, so use the Boustrophedon sorter (only the variant/direction differs)
+                s = f2c.RP_Boustrophedon()
+            elif order == "spiral":
                 s = f2c.RP_Spiral()
                 s.setSpiralSize(int(min(k, max(2, cell_sw.size()))))
             else:
@@ -192,7 +196,13 @@ def run_unit(cfg, nc, u, out_dir):
                                "ReedsShepp": "PP_ReedsSheppCurves", "ReedsSheppHC": "PP_ReedsSheppCurvesHC"}[tm_name])()
             tm.setDiscretization(float(cfg["turn_discretization"]))
             t0 = time.perf_counter()
-            track = fb.track_from_path(f2c, P.pp.planPath(P.robot, plan_in, tm))
+            try:
+                track = fb.track_from_path(f2c, P.pp.planPath(P.robot, plan_in, tm))
+            except Exception as e:     # e.g. F2C CubicSpline "x array is not sorted": fail this turn model only
+                rows += [{**common, "turn_model": tm_name, "sc": sc, "status": "error", "feasible": False,
+                          "error": f"{type(e).__name__}: {e}"[:300], **{k: round(v, 3) for k, v in T.items()}}
+                         for sc in (0, 1)]
+                continue
             t_pp = time.perf_counter() - t0
             if sims is None:           # coverage depends on the working pieces only: same for every turn model
                 t0 = time.perf_counter()
