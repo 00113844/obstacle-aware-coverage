@@ -14,12 +14,12 @@ md = lambda s: cells.append(("markdown", textwrap.dedent(s).strip("\n")))
 code = lambda s: cells.append(("code", textwrap.dedent(s).strip("\n")))
 
 md(r"""
-# Obstacle-aware coverage benchmark — runner (benchmark_v1)
+# Obstacle-aware coverage benchmark — runner (benchmark_v1_2, f2c_bench 1.4)
 
 This notebook runs `f2c_bench.py`, a headless batch runner that plans strategies **A, B1, B2 and B3** with Fields2Cover over the factorial design.
 It writes one CSV row per (instance, strategy, SC) and GeoJSON/coverage dumps for the seed-0 instances.
 
-* Results go to **Google Drive** (`MyDrive/F2C_benchmark/benchmark_v1`), so they survive a disconnect. **Re-run the "run" cell to resume**: finished instances are skipped.
+* Results go to **Google Drive** (`MyDrive/F2C_benchmark/benchmark_v1_2`), so they survive a disconnect. **Re-run the "run" cell to resume**: finished instances are skipped.
 * Each instance is planned in its own subprocess, so a crash inside Fields2Cover only loses that instance (see `parts/*.err`).
 * Expected cost is ≈2.5k route plans at a 10 s OR-Tools budget, i.e. **≈5–6 h with 2 workers**. Colab may disconnect, so plan on 1–2 resumes.
 
@@ -57,7 +57,7 @@ code(r'''
 # ---- 2. Google Drive for persistent results ----
 from google.colab import drive
 drive.mount("/content/drive")
-OUT = "/content/drive/MyDrive/F2C_benchmark/benchmark_v1"
+OUT = "/content/drive/MyDrive/F2C_benchmark/benchmark_v1_2"
 os.makedirs(OUT, exist_ok=True)
 os.makedirs("/content/bench", exist_ok=True)
 %cd /content/bench
