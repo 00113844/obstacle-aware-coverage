@@ -324,3 +324,11 @@ def corridor_passes(region, width, min_area=None):
                 if seg.geom_type == "LineString" and seg.length > width:
                     out.append(seg)
     return out
+
+
+def clean_poly(g, grid=1e-6):
+    """Snap to a fine grid and repair: F2C/OGR output can carry repeated or near-coincident vertices
+    (zero-length segments) that make GEOS overlay ops raise 'non-noded intersection'."""
+    g = shapely.make_valid(shapely.set_precision(g, grid))
+    polys_ = [p for p in getattr(g, "geoms", [g]) if p.geom_type in ("Polygon", "MultiPolygon")]
+    return unary_union(polys_) if polys_ else Polygon()

@@ -23,7 +23,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-BENCH_VERSION = "benchmark_v1 / f2c_bench 1.3.1"
+BENCH_VERSION = "benchmark_v1 / f2c_bench 1.4"
 
 CONFIG = dict(
     area_ha=20.0,
@@ -191,10 +191,17 @@ class Planner:
         if not self.cfg["cover_headlands"]:
             return []
         n = int(self.k) if n_rounds is None else int(n_rounds)
-        rings = self.hl.generateHeadlandSwaths(cells, self.w, max(1, n), False)
+        # 1.4: offset rings in shapely. F2C 2.1.1's generateHeadlandSwaths returns malformed rings
+        # (self-crossing, even outside the field) once the bands of many holes merge, which left
+        # B1's obstacle bands unworked (B1 missed% ~18-50 % at w=36, d=2 in benchmark_v1_1).
+        from bench_geom import clean_poly
+        region = clean_poly(to_shapely(cells))
         out = []
-        for i in range(len(rings)):
-            for p in polys(to_shapely(rings[i])):
+        for i in range(max(1, n)):
+            band = region.buffer(-(i + 0.5) * self.w)
+            for p in polys(band):
+                if p.is_empty or p.geom_type != "Polygon":
+                    continue
                 out += [LineString(p.exterior.coords)] + [LineString(r.coords) for r in p.interiors]
         return out
 
@@ -438,17 +445,21 @@ def run_instance(cfg, spec, out_dir):
             dec.setSplitAngle(angle_A)
             dcells = dec.decompose(mid_B)
             no_B2 = P.f2c.HG_Corridor_gen().generateHeadlands(dcells, 0.5 * P.k * w)
+            # 1.4: HG_Corridor_gen only opens corridors along SHARED cell borders, so outer and hole
+            # edges stayed on the mid-headland track: swaths ended where the turns start, and at
+            # k*w <= 2*r_min (w=12) the Dubins loops left the field / entered obstacle buffers.
+            # Clip to the B1 mainland so every outer/hole edge keeps the full k*w turning band.
+            no_B2 = no_B2.intersection(no_B)
             t_hg2 = time.perf_counter() - t0
             stage = "plan"
             sw, angle, t_sg2 = P.swaths(no_B2)
             route, t_rp2 = P.route(mid_B, sw)
             track, model, t_pp2 = P.path(route)
-            HL_B2 = P.headland_passes(cells_B, n_rounds=max(1, round(0.5 * P.k)))
+            HL_B2 = P.headland_passes(cells_B)
             # corridors between decomposed cells are travel lanes in F2C's recipe; work them as passes
-            from bench_geom import corridor_passes
-            from shapely.ops import unary_union as _uu
-            dshp = _uu([to_shapely(dcells.getGeometry(i)) for i in range(dcells.size())])
-            gaps = dshp.difference(to_shapely(no_B2)).buffer(-0.25).buffer(0.25)
+            from bench_geom import corridor_passes, clean_poly
+            gaps = clean_poly(no_B_shp).difference(clean_poly(to_shapely(no_B2)))
+            gaps = gaps.buffer(-0.25).buffer(0.25)
             HL_B2 = HL_B2 + corridor_passes(gaps, w)
             emit("B2", track, no_B_shp, HL_B2, dict(t_hg_s=round(t_hg2, 3), t_sg_s=round(t_sg2, 3),
                  t_rp_s=round(t_rp2, 3), t_pp_s=round(t_pp2, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model,
