@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Benchmark outputs (large; live on Drive / Nectar volume)
+results/
+
+# LaTeX build artefacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# The manuscript is its own git repository (paper session)
+paper/
+
+# Local scratch / screenshots / Colab logs
+app.log
+download.png
