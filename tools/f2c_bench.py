@@ -23,7 +23,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-BENCH_VERSION = "benchmark_v1 / f2c_bench 1.3"
+BENCH_VERSION = "benchmark_v1 / f2c_bench 1.3.1"
 
 CONFIG = dict(
     area_ha=20.0,
@@ -148,6 +148,11 @@ def track_from_path(f2c, path):
     return Track(segs, n_rev)
 
 
+class NoSwaths(RuntimeError):
+    """Nothing to route (empty mainland / headland track / zero swaths). F2C 2.1.1's genRoute does not
+    throw on this: OR-Tools CHECK-aborts the whole process (depot id -1), so we must guard first."""
+
+
 class Planner:
     """All F2C stages for one instance, with per-stage timers."""
 
@@ -196,6 +201,8 @@ class Planner:
     def swaths(self, no_hl, angle=None):
         t0 = time.perf_counter()
         obj = self.f2c.OBJ_NSwathModified()
+        if no_hl.size() == 0 or no_hl.area() < 1.0:
+            raise NoSwaths("no swaths: empty mainland")
         big = max(range(no_hl.size()), key=lambda i: no_hl.getGeometry(i).area())
         if angle is None:
             angle = self.bf.computeBestAngle(obj, self.w, no_hl.getGeometry(big))
@@ -250,6 +257,10 @@ class Planner:
         from shapely.geometry import Point
         f2c = self.f2c
         t0 = time.perf_counter()
+        if swaths.sizeTotal() == 0:
+            raise NoSwaths("no swaths")
+        if mid_hl.size() == 0 or mid_hl.area() < 1.0:
+            raise NoSwaths("no swaths: empty headland track")
         poly = max(polys(to_shapely(mid_hl)), key=lambda p: p.area)
         q = poly.exterior.interpolate(poly.exterior.project(Point(self.gate)))
         rp = f2c.RP_RoutePlannerBase()
@@ -400,6 +411,7 @@ def run_instance(cfg, spec, out_dir):
 
     if obs:
         # ---- B1: obstacles as holes with headland rings ----
+        mid_B = cells_B = no_B_shp = None
         try:
             cells_B = P.cells(holes)
             mid_B, no_B, t_hgB = P.headlands(cells_B)
@@ -411,19 +423,23 @@ def run_instance(cfg, spec, out_dir):
             emit("B1", track, no_B_shp, HL_B, dict(t_hg_s=round(t_hgB, 3), t_sg_s=round(t_sgB, 3),
                  t_rp_s=round(t_rpB, 3), t_pp_s=round(t_ppB, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model)
         except Exception as e:
-            emit("B1", None, None, None, {}, None, "", "", error=f"{type(e).__name__}: {e}")
-            mid_B = None
+            emit("B1", None, None, None, {}, None, "", "", error=str(e) if isinstance(e, NoSwaths) else f"{type(e).__name__}: {e}")
 
         # ---- B2: Boustrophedon decomposition ----
+        stage = "headlands"
         try:
-            if mid_B is None:
+            if mid_B is None or no_B_shp is None:
                 raise RuntimeError("B1 headlands unavailable")
+            if mid_B.size() == 0 or mid_B.area() < 1.0:
+                raise NoSwaths("no swaths: empty headland track")
+            stage = "decomp"
             t0 = time.perf_counter()
             dec = P.f2c.DECOMP_Boustrophedon()
             dec.setSplitAngle(angle_A)
             dcells = dec.decompose(mid_B)
             no_B2 = P.f2c.HG_Corridor_gen().generateHeadlands(dcells, 0.5 * P.k * w)
             t_hg2 = time.perf_counter() - t0
+            stage = "plan"
             sw, angle, t_sg2 = P.swaths(no_B2)
             route, t_rp2 = P.route(mid_B, sw)
             track, model, t_pp2 = P.path(route)
@@ -438,7 +454,8 @@ def run_instance(cfg, spec, out_dir):
                  t_rp_s=round(t_rp2, 3), t_pp_s=round(t_pp2, 3), t_detour_s=0.0), angle, sw.sizeTotal(), model,
                  decomp_failed=False)
         except Exception as e:
-            emit("B2", None, None, None, {}, None, "", "", decomp_failed=True, error=f"{type(e).__name__}: {e}")
+            emit("B2", None, None, None, {}, None, "", "", decomp_failed=(stage == "decomp" and not isinstance(e, NoSwaths)),
+                 error=str(e) if isinstance(e, NoSwaths) else f"{type(e).__name__}: {e}")
 
         # ---- B3: A's plan + detours (t_hg..t_pp are A's, since B3 reuses A's plan) ----
         t0 = time.perf_counter()
