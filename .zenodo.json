@@ -1,0 +1,31 @@
+{
+  "title": "obstacle-aware-coverage: Fields2Cover extensions, benchmark and data for obstacle-aware coverage paths and controlled-traffic tramlines",
+  "upload_type": "software",
+  "description": "<p>Code, benchmark and per-run results for the article <em>Drive around or cut holes? Obstacle-aware coverage paths and controlled-traffic tramlines for paddocks with scattered trees and rock outcrops</em>.</p><p>The release extends the open-source coverage planner Fields2Cover (v2.1.1) with gate-anchored routing, an obstacle model for trees and rock outcrops, a curvature-bounded drive-around strategy, a straddle strategy for low obstacles, a raster section-control model and a controlled-traffic (CTF) tramline model. It contains the benchmark generator and runners, the per-run results of experiments E1 (855 layout-width cases), E2 (180 native Fields2Cover configurations), E3 (straddling low outcrops) and E4 (CTF tramline layouts), and the analysis scripts that regenerate every number, table and figure of the article.</p><p>The simulation experiments were run on the Nectar Research Cloud, supported by the NCRIS-funded Australian Research Data Commons (ARDC).</p>",
+  "creators": [
+    {
+      "name": "Togeiro de Alckmin, Gustavo",
+      "affiliation": "The University of Western Australia",
+      "orcid": "0000-0002-0665-9426"
+    }
+  ],
+  "license": "BSD-3-Clause",
+  "access_right": "open",
+  "keywords": [
+    "coverage path planning",
+    "Fields2Cover",
+    "in-field obstacles",
+    "section control",
+    "controlled traffic farming",
+    "tramlines",
+    "precision agriculture"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Fields2Cover/Fields2Cover",
+      "relation": "isDerivedFrom",
+      "resource_type": "software"
+    }
+  ],
+  "language": "eng"
+}

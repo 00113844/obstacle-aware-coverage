@@ -1,0 +1,135 @@
+{
+ "bench_version": "benchmark_v1 / f2c_bench 1.6",
+ "created": "2026-11-18 01:22:40",
+ "python": "3.10.12",
+ "config": {
+  "area_ha": 20.0,
+  "shapes": [
+   "rectangle",
+   "convex",
+   "L"
+  ],
+  "densities": [
+   0.0,
+   0.5,
+   1.0,
+   2.0
+  ],
+  "obstacle_types": [
+   "tree",
+   "outcrop",
+   "mixed"
+  ],
+  "patterns": [
+   "poisson",
+   "thomas"
+  ],
+  "widths": {
+   "12": 6,
+   "24": 12,
+   "36": 18
+  },
+  "seeds": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "gate_subset": {
+   "shape": "rectangle",
+   "densities": [
+    0.5,
+    2.0
+   ],
+   "width": 24,
+   "otype": "tree",
+   "pattern": "poisson"
+  },
+  "r_min": 6.0,
+  "max_diff_curv": 0.1,
+  "cruise_vel": 2.5,
+  "turn_vel": 1.2,
+  "reverse_penalty_s": 10.0,
+  "margin": 3.0,
+  "k_min": 2,
+  "track_width": 3.0,
+  "b4": true,
+  "b4_in_selection": false,
+  "rp_time": 10,
+  "rp_optimum": true,
+  "allow_reverse": true,
+  "turn_discretization": 0.2,
+  "sg_allow_overlap": false,
+  "fill_remainders": true,
+  "raster_res": 1.0,
+  "cover_headlands": true,
+  "placement_inset": 10.0,
+  "c_t": 2.5,
+  "c_p": 40.0,
+  "c_m": 300.0,
+  "angle_by_C": false,
+  "geojson_seeds": [
+   0
+  ],
+  "instance_timeout_s": 1800,
+  "detours_only": false,
+  "ctf": {
+   "w_b": 12.0,
+   "gauge": 3.0,
+   "tyre_width": 0.6,
+   "r_min_seeder": 6.0,
+   "r_min_harvester": 8.0,
+   "s_min": 6.0,
+   "s_min_sens": 12.0,
+   "nest_k": 2,
+   "off_lane_tol": 0.5,
+   "traffic_res": 0.2,
+   "curv_ds": 0.5,
+   "curv_window": 2.0,
+   "radius_tol": 0.03,
+   "seeder_sections": 6,
+   "part3_filter": {
+    "otype": "mixed",
+    "pattern": "poisson",
+    "density": 1.0,
+    "gate_type": "road",
+    "shapes": [
+     "rectangle",
+     "L"
+    ]
+   },
+   "part3_turn_model": "DubinsCC",
+   "part3_rp_time": 10
+  }
+ },
+ "fields2cover": "2.1.1",
+ "shapely": "2.1.2",
+ "git": "not a git repo",
+ "source_sha256": {
+  "f2c_bench.py": "83010fa32f91c3ab",
+  "bench_geom.py": "7d94193294479d73",
+  "nb_geom.py": "58181f2e79d4e736",
+  "ctf_geom.py": "ddf2ea9f60d408c9",
+  "ctf_bench.py": "9b36a9136b0930af"
+ },
+ "ctf_version": "ctf_v1 / ctf_bench 1.0",
+ "ctf_definitions": {
+  "layouts": "shared d_j=(j-floor((n-1)/2))*w_b (primary; sprayer on a base lane; even n: edge lane added on the side without a neighbour pass); centred d_j=(j-(n-1)/2)*w_b (sensitivity). d measured along the canonical normal of the pass chord.",
+  "r_ctf": "max(r_min_seeder, r_min_harvester)",
+  "B3c": "rho = r_ctf + d_max; clearance half-width h_env = max(w_s/2, d_max + w_b/2) for every obstacle (class I for the lanes); set corners eps = max(m + h_env, rho); hard set obstacle + B(h_env)",
+  "B3n": "B3c plus nesting: neighbour pass on the bulge side avoids conv(bump) + B(c_sep), c_sep = max(w_s - w_b + s_min, r_ctf + d_max), forced side, iterated to a fixed point; depth = nested passes per obstacle group",
+  "variants": "B3c, B3n (s_min), B3n_s12 (s_min_sens), B3n_k2 (B3n with chains stopped after nest_k pushed passes); even n also B3c_ctr, B3n_ctr with the centred-layout d_max",
+  "lane_valid": "no cusp (1 - d*kappa <= 0 anywhere), lane simple, min radius >= r_ctf*(1-radius_tol); kappa from tangent angle change over curv_window on a curv_ds resampling. *_seeder_*: same with r_min_seeder",
+  "lane_clear_tool_min_m": "min over lanes/obstacles dist(lane, obstacle) - w_b/2 (ground-engaging tool, all obstacles); n_clear_fail_lanes counts lanes < 0",
+  "lane_clear_wheel_min_m": "min dist(lane, obstacle) - gauge/2",
+  "spacing": "nearest other swath lane, sampled every 2 m excluding w_b/2 at lane ends; squeeze < w_b-0.5, gap > w_b+0.5 (length, m); lane_squeeze_share_pct = share of sampled lane length with spacing < 0.75 w_b",
+  "network": "swath lanes (+B2 corridor lanes) + base-machine headland rings at (i+0.5) w_b filling the k*w_s band of the strategy's cells (outer boundary and B1/B2 holes)",
+  "n_lane_overlaps": "pairs of lanes within 0.5 m of each other for > 24 m (duplicated tramline)",
+  "n_lane_breaks": "tramline stops = round(lane ends farther than k*w_s + w_b from the paddock boundary / 2) + lanes with tool clearance < 0 (they must stop at the obstacle)",
+  "off_lane": "mean over the two wheels (gauge) of wheel-line length farther than off_lane_tol from network wheel tracks",
+  "trafficked": "raster traffic_res, tyre_width footprints; unique_trafficked_ha = sprayer path + headland passes + all lane wheel tracks; _season adds the Part-3 seeder and harvester turns",
+  "sown": "simulate_coverage with the w_b seeder along all lanes + base headland rings; *_sc_* with seeder_sections",
+  "part3": "subset part3_filter, every width; strategies except A; RP_RoutePlannerBase from the gate projected on the strategy's mid headland, GLS part3_rp_time s; PP DubinsCC; robot w_b, r_min per machine, same speeds as the sprayer; time = (lanes + base headland rings)/cruise + turns/turn_vel; harvester has no SC"
+ }
+}

@@ -1,0 +1,2 @@
+2026-11-17T08:47:03Z benchmark_v1_2 started with f2c_bench 1.4 (git 88d2e03): B2 clipped to B1 mainland, shapely headland rings, clean_poly. Supersedes v1_1 for B1/B2 and selection.
+2026-11-17T09:45:58Z re-ran first 40 completed instances (rerun_ids.txt): they overlapped ~2 min of a concurrent F2C build/ctest on the VM, so their 10 s OR-Tools searches had less CPU

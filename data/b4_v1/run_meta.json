@@ -1,0 +1,86 @@
+{
+ "bench_version": "benchmark_v1 / f2c_bench 1.5",
+ "created": "2026-11-17 12:48:44",
+ "python": "3.10.12",
+ "config": {
+  "area_ha": 20.0,
+  "shapes": [
+   "rectangle",
+   "convex",
+   "L"
+  ],
+  "densities": [
+   0.0,
+   0.5,
+   1.0,
+   2.0
+  ],
+  "obstacle_types": [
+   "tree",
+   "outcrop",
+   "mixed"
+  ],
+  "patterns": [
+   "poisson",
+   "thomas"
+  ],
+  "widths": {
+   "12": 6,
+   "24": 12,
+   "36": 18
+  },
+  "seeds": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "gate_subset": {
+   "shape": "rectangle",
+   "densities": [
+    0.5,
+    2.0
+   ],
+   "width": 24,
+   "otype": "tree",
+   "pattern": "poisson"
+  },
+  "r_min": 6.0,
+  "max_diff_curv": 0.1,
+  "cruise_vel": 2.5,
+  "turn_vel": 1.2,
+  "reverse_penalty_s": 10.0,
+  "margin": 3.0,
+  "k_min": 2,
+  "track_width": 3.0,
+  "b4": true,
+  "b4_in_selection": false,
+  "rp_time": 10,
+  "rp_optimum": true,
+  "allow_reverse": true,
+  "turn_discretization": 0.2,
+  "sg_allow_overlap": false,
+  "fill_remainders": true,
+  "raster_res": 1.0,
+  "cover_headlands": true,
+  "placement_inset": 10.0,
+  "c_t": 2.5,
+  "c_p": 40.0,
+  "c_m": 300.0,
+  "angle_by_C": false,
+  "geojson_seeds": [
+   0
+  ],
+  "instance_timeout_s": 1800,
+  "detours_only": true
+ },
+ "fields2cover": "2.1.1",
+ "shapely": "2.1.2",
+ "git": "not a git repo",
+ "source_sha256": {
+  "f2c_bench.py": "49676d302a6ff7d4",
+  "bench_geom.py": "ff42b77771a1ab96",
+  "nb_geom.py": "58181f2e79d4e736"
+ }
+}

@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use this software or data, please cite it as below."
+title: "obstacle-aware-coverage: Fields2Cover extensions, benchmark and data for obstacle-aware coverage paths and controlled-traffic tramlines"
+type: software
+authors:
+  - family-names: "Togeiro de Alckmin"
+    given-names: "Gustavo"
+    affiliation: "The University of Western Australia"
+    orcid: "https://orcid.org/0000-0002-0665-9426"
+version: "1.0.0"
+date-released: "2026-11-18"
+license: BSD-3-Clause
+repository-code: "https://github.com/00113844/obstacle-aware-coverage"
+keywords:
+  - coverage path planning
+  - Fields2Cover
+  - in-field obstacles
+  - section control
+  - controlled traffic farming
+  - tramlines
+references:
+  - type: article
+    title: "Fields2Cover: An open-source coverage path planning library for unmanned agricultural vehicles"
+    authors:
+      - family-names: "Mier"
+        given-names: "Gonzalo"
+      - family-names: "Valente"
+        given-names: "João"
+      - family-names: "de Bruin"
+        given-names: "Sytze"
+    journal: "IEEE Robotics and Automation Letters"
+    year: 2023
+    doi: "10.1109/LRA.2023.3248439"

@@ -1,0 +1,160 @@
+{
+ "bench_version": "benchmark_v1 / f2c_bench 1.5",
+ "created": "2026-11-17 13:03:04",
+ "python": "3.10.12",
+ "config": {
+  "area_ha": 20.0,
+  "shapes": [
+   "rectangle",
+   "convex",
+   "L"
+  ],
+  "densities": [
+   0.0,
+   0.5,
+   1.0,
+   2.0
+  ],
+  "obstacle_types": [
+   "tree",
+   "outcrop",
+   "mixed"
+  ],
+  "patterns": [
+   "poisson",
+   "thomas"
+  ],
+  "widths": {
+   "12": 6,
+   "24": 12,
+   "36": 18
+  },
+  "seeds": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "gate_subset": {
+   "shape": "rectangle",
+   "densities": [
+    0.5,
+    2.0
+   ],
+   "width": 24,
+   "otype": "tree",
+   "pattern": "poisson"
+  },
+  "r_min": 6.0,
+  "max_diff_curv": 0.1,
+  "cruise_vel": 2.5,
+  "turn_vel": 1.2,
+  "reverse_penalty_s": 10.0,
+  "margin": 3.0,
+  "k_min": 2,
+  "track_width": 3.0,
+  "b4": true,
+  "b4_in_selection": false,
+  "rp_time": 10,
+  "rp_optimum": true,
+  "allow_reverse": true,
+  "turn_discretization": 0.2,
+  "sg_allow_overlap": false,
+  "fill_remainders": true,
+  "raster_res": 1.0,
+  "cover_headlands": true,
+  "placement_inset": 10.0,
+  "c_t": 2.5,
+  "c_p": 40.0,
+  "c_m": 300.0,
+  "angle_by_C": false,
+  "geojson_seeds": [
+   3
+  ],
+  "instance_timeout_s": 1800,
+  "detours_only": false
+ },
+ "fields2cover": "2.1.1",
+ "shapely": "2.1.2",
+ "git": "not a git repo",
+ "source_sha256": {
+  "f2c_bench.py": "49676d302a6ff7d4",
+  "bench_geom.py": "ff42b77771a1ab96",
+  "nb_geom.py": "58181f2e79d4e736",
+  "native_bench.py": "a3bca230bb9b06fd"
+ },
+ "native_version": "native_v1 / native_bench 1.0.2",
+ "native_config": {
+  "shapes": [
+   "rectangle",
+   "L"
+  ],
+  "densities": [
+   0.0,
+   1.0
+  ],
+  "otype": "mixed",
+  "pattern": "poisson",
+  "widths": [
+   12,
+   24
+  ],
+  "seeds": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "gate": "road",
+  "decomps": [
+   "none",
+   "boustrophedon",
+   "trapezoidal"
+  ],
+  "objectives": [
+   "NSwath",
+   "NSwathModified",
+   "SwathLength"
+  ],
+  "orders": [
+   "boustrophedon",
+   "snake",
+   "spiral",
+   "rp_first",
+   "rp_gls"
+  ],
+  "turn_models": [
+   "Dubins",
+   "DubinsCC",
+   "ReedsShepp",
+   "ReedsSheppHC"
+  ],
+  "spiral_k": 4,
+  "rp_time_gls": 10,
+  "unit_timeout_s": 900
+ },
+ "figs_export": {
+  "native": {
+   "N_sort": [
+    "none",
+    "boustrophedon"
+   ],
+   "N_rp": [
+    "none",
+    "rp_gls"
+   ],
+   "N_dec": [
+    "boustrophedon",
+    "rp_gls"
+   ],
+   "N_trap": [
+    "trapezoidal",
+    "rp_gls"
+   ]
+  },
+  "sg_obj": "NSwath",
+  "turn_model": "DubinsCC"
+ }
+}

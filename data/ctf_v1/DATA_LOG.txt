@@ -1,0 +1,1 @@
+2026-11-18T01:22:40Z ctf_v1 (E4/R10): ctf_bench 1.0 on f2c_bench 1.6, E1 design (865) + B4 + B3c/B3n/B3n_s12/B3n_k2 (+_ctr at 2:1); Part 3 on rect/L mixed poisson d1 road; local git 8374b0c
