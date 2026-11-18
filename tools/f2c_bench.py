@@ -23,7 +23,10 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-BENCH_VERSION = "benchmark_v1 / f2c_bench 1.5"
+BENCH_VERSION = "benchmark_v1 / f2c_bench 1.6"
+# 1.6: optional HOOKS (used by ctf_bench.py for E4); with no hooks the plans and rows equal 1.5.
+HOOKS = {}
+BASE_STRATEGIES = ("A", "B1", "B2", "B3", "B4")
 
 CONFIG = dict(
     area_ha=20.0,
@@ -109,7 +112,8 @@ def run_meta(cfg):
         meta["git"] = "not a git repo"
     import hashlib
     meta["source_sha256"] = {f: hashlib.sha256(open(os.path.join(HERE, f), "rb").read()).hexdigest()[:16]
-                             for f in ("f2c_bench.py", "bench_geom.py", "nb_geom.py")}
+                             for f in ("f2c_bench.py", "bench_geom.py", "nb_geom.py", "ctf_geom.py", "ctf_bench.py")
+                             if os.path.exists(os.path.join(HERE, f))}
     return meta
 
 
@@ -376,6 +380,7 @@ def run_instance(cfg, spec, out_dir):
                   gate_x=round(gate[0], 2), gate_y=round(gate[1], 2),
                   n_groups=len(obstacle_groups(obs, cfg["margin"])) if obs else 0)
     rows, geo = [], {}
+    mid_B = cells_B = None
 
     def emit(strategy, track, crop, extra, timings, angle, n_sw, turn_model, unplaced="", decomp_failed="", error="",
              half=None):
@@ -425,7 +430,7 @@ def run_instance(cfg, spec, out_dir):
     if obs:
         if not cfg.get("detours_only", False):   # 1.5: B4 runs need only A, B3, B4
             # ---- B1: obstacles as holes with headland rings ----
-            mid_B = cells_B = no_B_shp = None
+            no_B_shp = None
             try:
                 cells_B = P.cells(holes)
                 mid_B, no_B, t_hgB = P.headlands(cells_B)
@@ -491,12 +496,22 @@ def run_instance(cfg, spec, out_dir):
             emit("B4", track_B4, crop_A, HL_A, {**tim_A, "t_detour_s": round(time.perf_counter() - t0, 3)},
                  angle_A, nsw_A, model_A, unplaced=unplaced4, half=half4)
 
+        if HOOKS.get("strategies"):
+            HOOKS["strategies"](dict(cfg=cfg, spec=spec, P=P, field=field, obs=obs, w=w, emit=emit, track_A=track_A,
+                                     tim_A=tim_A, crop_A=crop_A, HL_A=HL_A, angle_A=angle_A, nsw_A=nsw_A,
+                                     model_A=model_A))
+
     # ---- selection by C among feasible obstacle strategies (SC on) ----
     cands = [r for r in rows if r["sc"] == 1 and r.get("feasible") and (r["strategy"] != "A" or not obs)
+             and r["strategy"] in BASE_STRATEGIES
              and (r["strategy"] != "B4" or cfg.get("b4_in_selection", False))]
     best = min(cands, key=lambda r: r["crit_C"])["strategy"] if cands else ""
     for r in rows:
         r["selected"] = int(r["strategy"] == best)
+
+    if HOOKS.get("post"):
+        HOOKS["post"](dict(cfg=cfg, spec=spec, P=P, field=field, obs=obs, zones=zones, gate=gate, geo=geo, rows=rows,
+                           w=w, cells_A=cells_A, mid_A=mid_A, cells_B=cells_B, mid_B=mid_B, out_dir=out_dir))
 
     # ---- outputs ----
     os.makedirs(os.path.join(out_dir, "parts"), exist_ok=True)

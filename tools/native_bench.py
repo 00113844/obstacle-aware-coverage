@@ -128,7 +128,8 @@ def sorted_swaths(f2c, swaths_by_cells, order, k, gate):
     return out
 
 
-def run_unit(cfg, nc, u, out_dir):
+def run_unit(cfg, nc, u, out_dir, capture=None):
+    """capture: optional dict; receives {turn_model: dict(track, extra, sims)} for figure exports."""
     from shapely.ops import unary_union
     from bench_geom import length_outside, turn_length_inside, clearance, max_curvature
     f2c = fb._f2c()
@@ -209,6 +210,8 @@ def run_unit(cfg, nc, u, out_dir):
                 _, sims = fb.evaluate(cfg, track, field_shp=field, zones=zones, crop=crop, obstacles=obs, width=w,
                                       n_sections=ns, extra=HL)
                 t_sim = time.perf_counter() - t0
+            if capture is not None:
+                capture[tm_name] = dict(track=track, extra=HL, sims=sims)
             L_sw, L_tn = track.length("swath"), track.length("turn")
             L_hl = sum(g.length for g in HL)
             L_gate = gate_legs_from_track(track) if leg_extra is None else leg_extra

@@ -188,7 +188,7 @@ def _detour_local(S, L, rho, step):
     return np.vstack([f1, tc, f2]), x1, x2
 
 
-def detour_line_convex(line, sets, rho, is_valid, step=0.5, mergeable=None, max_iter=12):
+def detour_line_convex(line, sets, rho, is_valid, step=0.5, mergeable=None, max_iter=12, force=None, details=None):
     """Splice detours into straight swath `line` around every smooth convex set in `sets`
     (shapely polygons) that touches it. Returns (LineString, n_unplaced).
 
@@ -198,7 +198,11 @@ def detour_line_convex(line, sets, rho, is_valid, step=0.5, mergeable=None, max_
       2. every set is tried on both sides; if a set fails, the sets of `mergeable` near it are
          merged into it and the whole list is re-checked from step 1;
       3. a set that still fails is left unplaced (the swath drives straight; it is flagged).
-    The committed detours are verified to be strictly ordered along the swath."""
+    The committed detours are verified to be strictly ordered along the swath.
+    force (CTF B3n): optional list parallel to `sets` of None or a world vector; a set with a vector is
+    only passed on that side (merged sets inherit the first forced side). details: optional list that
+    receives one dict(profile=LineString, x1, x2, dir=world unit vector of the bulge) per placed detour.
+    With force=None and details=None the behaviour is identical to f2c_bench 1.5."""
     p0, p1 = np.asarray(line.coords[0], float), np.asarray(line.coords[-1], float)
     L = np.hypot(*(p1 - p0))
     u = (p1 - p0) / L
@@ -210,59 +214,62 @@ def detour_line_convex(line, sets, rho, is_valid, step=0.5, mergeable=None, max_
     on_swath = lambda s: s.intersects(axis) and s.bounds[2] > -rho and s.bounds[0] < L + rho
 
     def merge_overlapping(hs):
-        hs = sorted(hs, key=lambda s: s.bounds[0])
+        hs = sorted(hs, key=lambda s: s[0].bounds[0])
         out = []
-        for s in hs:
-            if out and out[-1].bounds[2] + 2 * rho > s.bounds[0]:
-                out[-1] = unary_union([out[-1], s]).convex_hull
+        for s, f in hs:
+            if out and out[-1][0].bounds[2] + 2 * rho > s.bounds[0]:
+                out[-1] = (unary_union([out[-1][0], s]).convex_hull, out[-1][1] if out[-1][1] else f)
             else:
-                out.append(s)
+                out.append((s, f))
         return out if len(out) == len(hs) else merge_overlapping(out)
 
-    def best_side(S):
+    def best_side(S, f=None):
         best = None
-        for flip in (1, -1):
+        for flip in ((1, -1) if not f else (f,)):
             res = _detour_local(affinity.scale(S, 1, flip, origin=(0, 0)), L, rho, step)
             if res is None:
                 continue
             prof = res[0] * np.array([1, flip])
             piece = LineString(to_world(prof))
             if is_valid(piece) and (best is None or piece.length < best[0]):
-                best = (piece.length, prof, res[1], res[2])
+                best = (piece.length, prof, res[1], res[2], flip)
         return best
 
     loc_merge = [to_local(g) for g in (mergeable or [])]
-    hits = [s for s in (to_local(s) for s in sets) if on_swath(s)]
+    fl = [None] * len(sets) if force is None else         [None if v is None else (1 if float(np.dot(v, n)) > 0 else -1) for v in force]
+    hits = [(s, f) for s, f in ((to_local(s), f) for s, f in zip(sets, fl)) if on_swath(s)]
     unplaced_sets = []
     for _ in range(max_iter):
         hits = merge_overlapping(hits)
         placed, failed = [], None
-        for S in hits:
-            b = best_side(S)
+        for S, f in hits:
+            b = best_side(S, f)
             if b is None:
-                failed = S
+                failed = (S, f)
                 break
             placed.append(b)
         if failed is None:
             break
-        extra = [m for m in loc_merge if m.intersects(failed.buffer(2 * rho)) and not m.within(failed)]
-        grown = unary_union([failed] + extra).convex_hull if extra else None
-        hits = [s for s in hits if s is not failed]
-        if grown is not None and grown.area > failed.area * 1.001:
-            hits.append(grown)            # retry with the grown hull (re-merged in step 1)
+        extra = [m for m in loc_merge if m.intersects(failed[0].buffer(2 * rho)) and not m.within(failed[0])]
+        grown = unary_union([failed[0]] + extra).convex_hull if extra else None
+        hits = [h for h in hits if h is not failed]
+        if grown is not None and grown.area > failed[0].area * 1.001:
+            hits.append((grown, failed[1]))   # retry with the grown hull (re-merged in step 1)
         else:
-            unplaced_sets.append(failed)  # give up on this one: straight through, flagged
+            unplaced_sets.append(failed[0])   # give up on this one: straight through, flagged
     else:
-        placed = [b for b in (best_side(S) for S in merge_overlapping(hits)) if b is not None]
+        placed = [b for b in (best_side(S, f) for S, f in merge_overlapping(hits)) if b is not None]
 
     placed.sort(key=lambda b: b[2])
     pts, x_prev = [np.zeros(2)], 0.0
-    for _, prof, x1, x2 in placed:
+    for _, prof, x1, x2, flip in placed:
         if x1 < x_prev - 1e-6:            # should be impossible after merging; never backtrack
             unplaced_sets.append(None)
             continue
         pts.extend(prof)
         x_prev = x2
+        if details is not None:
+            details.append(dict(profile=LineString(to_world(prof)), x1=x1, x2=x2, dir=flip * n))
     pts.append(np.array([L, 0.0]))
     P = np.asarray(pts)
     keep = np.r_[True, np.hypot(*np.diff(P, axis=0).T) > 1e-6]   # drop duplicate vertices at joins
